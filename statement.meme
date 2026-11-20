@@ -1,0 +1,214 @@
+# statement.meme -- monthly account statements.
+#
+# All month bucketing is computed in-language from epoch seconds (UTC,
+# civil-calendar arithmetic, no date builtins). Money totals are integer
+# cents; dollar text is rendered exactly via ledger.dollars_text.
+
+use ledger
+
+# ------------------------------------------------------------------ calendar
+
+function is_leap_year(y: Int) -> Bool:
+    if y % 4 != 0:
+        return false
+    if y % 100 != 0:
+        return true
+    if y % 400 == 0:
+        return true
+    return false
+
+function days_in_month(y: Int, m: Int) -> Int:
+    if m == 1 or m == 3 or m == 5 or m == 7 or m == 8 or m == 10 or m == 12:
+        return 31
+    if m == 4 or m == 6 or m == 9 or m == 11:
+        return 30
+    if is_leap_year(y):
+        return 29
+    return 28
+
+function days_before_year(y: Int) -> Int:
+    # days from 1970-01-01 to yyyy-01-01 (UTC)
+    define days as 0
+    for yy from 1970 to y - 1:
+        if is_leap_year(yy):
+            add 366 to days
+        else:
+            add 365 to days
+    return days
+
+function days_before_month(y: Int, m: Int) -> Int:
+    # days from yyyy-01-01 to the first of yyyy-mm
+    define days as 0
+    for mm from 1 to m - 1:
+        add days_in_month(y, mm) to days
+    return days
+
+function epoch_to_month_index(e: Int) -> Int:
+    # year * 12 + (month - 1) for a non-negative UTC epoch
+    define days_left as e / 86400
+    define y as 1970
+    define walking_years as true
+    while walking_years:
+        define yd as 365
+        if is_leap_year(y):
+            set yd to 366
+        if days_left >= yd:
+            subtract yd from days_left
+            add 1 to y
+        else:
+            set walking_years to false
+    define m as 1
+    define walking_months as true
+    while walking_months:
+        define md as days_in_month(y, m)
+        if days_left >= md:
+            subtract md from days_left
+            add 1 to m
+        else:
+            set walking_months to false
+    return y * 12 + m - 1
+
+function epoch_to_day(e: Int, year: Int, month: Int) -> Int:
+    # day-of-month (1-based) of a non-negative UTC epoch
+    define d as e / 86400
+    subtract days_before_year(year) from d
+    subtract days_before_month(year, month) from d
+    add 1 to d
+    return d
+
+function pad2(n: Int) -> String:
+    if n < 10:
+        return "0" + text of n
+    return text of n
+
+# --------------------------------------------------------------- replay math
+
+function transactions_for_account(txs: List<Transaction>, acct_id: Int) -> List<Transaction>:
+    define out as empty List<Transaction>
+    for each t in txs:
+        if t.from_id == acct_id or t.to_id == acct_id:
+            add t to out
+    return out
+
+function sort_transactions_by_epoch(txs: List<Transaction>) -> List<Transaction>:
+    # stable insertion sort on (epoch, id); operates on an explicit
+    # element-wise copy (see copy_accounts note in ledger.meme: the plain
+    # list-decl copy aliases backing storage on Go, C, and TypeScript)
+    define out as empty List<Transaction>
+    for each t in txs:
+        add t to out
+    for i from 1 to length of out - 1:
+        define key as out[i]
+        define j as i - 1
+        define shifting as true
+        while shifting:
+            if j < 0:
+                set shifting to false
+            else:
+                if out[j].epoch > key.epoch or (out[j].epoch == key.epoch and out[j].id > key.id):
+                    set out[j + 1] to out[j]
+                    subtract 1 from j
+                else:
+                    set shifting to false
+        set out[j + 1] to key
+    return out
+
+function account_delta(t: Transaction, acct_id: Int) -> Int:
+    # signed effect of one transaction on one account
+    define d as 0
+    if t.from_id == acct_id:
+        subtract t.amount_cents from d
+    if t.to_id == acct_id:
+        add t.amount_cents to d
+    return d
+
+# Replays every transaction of one account in chronological order and
+# returns [opening, closing, total_in, total_out, count] for the month.
+function month_replay(txs: List<Transaction>, acct_id: Int, bucket: Int) -> List<Int>:
+    define mine as sort_transactions_by_epoch(transactions_for_account(txs, acct_id))
+    define running as 0
+    define opening as 0
+    define closing as 0
+    define total_in as 0
+    define total_out as 0
+    define count as 0
+    define opening_set as false
+    for each t in mine:
+        define mi as epoch_to_month_index(t.epoch)
+        define d as account_delta(t, acct_id)
+        if mi == bucket:
+            if not opening_set:
+                set opening to running
+                set opening_set to true
+            add 1 to count
+            if d >= 0:
+                add d to total_in
+            else:
+                subtract d from total_out
+        else:
+            if mi > bucket:
+                if not opening_set:
+                    set opening to running
+                    set opening_set to true
+        set running to running + d
+        if mi == bucket:
+            set closing to running
+    if not opening_set:
+        set opening to running
+    if count == 0:
+        set closing to opening
+    define result as empty List<Int>
+    add opening to result
+    add closing to result
+    add total_in to result
+    add total_out to result
+    add count to result
+    return result
+
+function transaction_kind(t: Transaction, acct_id: Int) -> String:
+    if t.from_id == 0:
+        return "DEPOSIT"
+    if t.to_id == 0:
+        return "WITHDRAWAL"
+    if t.to_id == acct_id:
+        return "TRANSFER IN"
+    return "TRANSFER OUT"
+
+function print_month_statement(accounts: List<Account>, txs: List<Transaction>, name: String, year: Int, month: Int) -> Optional<String>:
+    if month < 1 or month > 12:
+        return optional "month must be 01..12"
+    if year < 1970:
+        return optional "year must be 1970 or later"
+    define idx as find_account_index(accounts, name)
+    if idx < 0:
+        define msg as "unknown account: " + name
+        return optional msg
+    define acct as accounts[idx]
+    define bucket as year * 12 + month - 1
+    define summary as month_replay(txs, acct.id, bucket)
+    define opening as summary[0]
+    define closing as summary[1]
+    define total_in as summary[2]
+    define total_out as summary[3]
+    define count as summary[4]
+    print "== Monthly statement: " + acct.name + " (id " + text of acct.id + "), " + text of year + "-" + pad2(month) + " =="
+    print "Opening balance: $" + dollars_text(opening)
+    define mine as sort_transactions_by_epoch(transactions_for_account(txs, acct.id))
+    define running as opening
+    for each t in mine:
+        define mi as epoch_to_month_index(t.epoch)
+        if mi == bucket:
+            define d as account_delta(t, acct.id)
+            set running to running + d
+            define sign as "+"
+            if d < 0:
+                set sign to "-"
+            define shown as d
+            if d < 0:
+                set shown to 0 - d
+            print text of year + "-" + pad2(month) + "-" + pad2(epoch_to_day(t.epoch, year, month)) + " " + transaction_kind(t, acct.id) + " " + sign + "$" + dollars_text(shown) + " $" + dollars_text(running)
+    print "Closing balance: $" + dollars_text(closing)
+    print "Total in: $" + dollars_text(total_in)
+    print "Total out: $" + dollars_text(total_out)
+    print "Transactions: " + text of count
+    return nothing

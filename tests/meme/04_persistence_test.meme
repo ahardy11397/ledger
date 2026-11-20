@@ -1,0 +1,60 @@
+# 04_persistence_test.meme -- JSON roundtrips and corrupt-file tolerance via
+# the Optional readers. Scratch files use per-test unique names and live in
+# the compiler-managed test working directory (cleaned up automatically).
+use ledger
+
+test json_roundtrip_accounts_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=12345) to accounts
+    add Account(id=2, name="bob", balance_cents=7) to accounts
+    call save_accounts(accounts, "pt_roundtrip_accounts.json")
+    define loaded as read json records Account from file "pt_roundtrip_accounts.json" or else nothing
+    assert loaded is not nothing
+    define back as value of loaded
+    assert length of back == 2
+    assert back[0].name == "alice"
+    assert back[0].balance_cents == 12345
+    assert back[1].balance_cents == 7
+
+test json_roundtrip_transactions_test:
+    define txs as empty List<Transaction>
+    add Transaction(id=1, from_id=0, to_id=1, amount_cents=500, epoch=1700000000) to txs
+    add Transaction(id=2, from_id=1, to_id=2, amount_cents=200, epoch=1700000100) to txs
+    call save_transactions(txs, "pt_roundtrip_txs.json")
+    define loaded as read json records Transaction from file "pt_roundtrip_txs.json" or else nothing
+    assert loaded is not nothing
+    define back as value of loaded
+    assert length of back == 2
+    assert back[0].from_id == 0
+    assert back[1].to_id == 2
+    assert back[1].epoch == 1700000100
+
+test load_missing_file_test:
+    define accounts as load_accounts("pt_missing_accounts.json")
+    assert length of accounts == 0
+    define txs as load_transactions("pt_missing_txs.json")
+    assert length of txs == 0
+
+test corrupt_file_tolerance_test:
+    write file "pt_corrupt_accounts.json" with "not json at all"
+    define raw as read json records Account from file "pt_corrupt_accounts.json" or else nothing
+    assert raw is nothing
+    define accounts as load_accounts("pt_corrupt_accounts.json")
+    assert length of accounts == 0
+
+test wrong_shape_file_tolerance_test:
+    # valid JSON, but not an array of Account records
+    write file "pt_wrong_shape.json" with "[1, 2, 3]"
+    define raw as read json records Account from file "pt_wrong_shape.json" or else nothing
+    assert raw is nothing
+    define accounts as load_accounts("pt_wrong_shape.json")
+    assert length of accounts == 0
+
+test save_load_roundtrip_via_helpers_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="carol", balance_cents=999) to accounts
+    call save_accounts(accounts, "pt_helper_accounts.json")
+    define back as load_accounts("pt_helper_accounts.json")
+    assert length of back == 1
+    assert back[0].name == "carol"
+    assert back[0].balance_cents == 999

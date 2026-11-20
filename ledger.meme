@@ -1,0 +1,187 @@
+# ledger.meme -- core banking-ledger domain: records, persistence,
+# id allocation, account lookup, validation, and money rendering.
+#
+# Money is always integer cents (Int). Error channels are Optional<String>
+# (nothing = ok, some = error message). No function mutates a caller's
+# list; callers apply changes at their own top level so every backend
+# (Python, Rust, C++, Go, C, TypeScript) sees identical value semantics.
+
+record Account:
+    id: Int
+    name: String
+    balance_cents: Int
+
+record Transaction:
+    id: Int
+    from_id: Int
+    to_id: Int
+    amount_cents: Int
+    epoch: Int
+
+# ---------------------------------------------------------------- persistence
+
+function load_accounts(path: String) -> List<Account>:
+    define loaded as read json records Account from file path or else nothing
+    define result as empty List<Account>
+    if loaded is not nothing:
+        set result to value of loaded
+    return result
+
+function save_accounts(accounts: List<Account>, path: String) -> Void:
+    write accounts as json to file path
+
+function load_transactions(path: String) -> List<Transaction>:
+    define loaded as read json records Transaction from file path or else nothing
+    define result as empty List<Transaction>
+    if loaded is not nothing:
+        set result to value of loaded
+    return result
+
+function save_transactions(txs: List<Transaction>, path: String) -> Void:
+    write txs as json to file path
+
+# ------------------------------------------------------------- ids and lookup
+
+function next_account_id(accounts: List<Account>) -> Int:
+    define best as 0
+    for each a in accounts:
+        if a.id > best:
+            set best to a.id
+    return best + 1
+
+function next_transaction_id(txs: List<Transaction>) -> Int:
+    define best as 0
+    for each t in txs:
+        if t.id > best:
+            set best to t.id
+    return best + 1
+
+function find_account_index(accounts: List<Account>, wanted: String) -> Int:
+    define idx as 0 - 1
+    for i from 0 to length of accounts - 1:
+        if accounts[i].name == wanted:
+            set idx to i
+    return idx
+
+# ---------------------------------------------------------------- validation
+# Each check returns nothing when the operation may proceed, or an error
+# message when it must be rejected.
+
+function check_new_name(accounts: List<Account>, name: String) -> Optional<String>:
+    if name == "":
+        return optional "account name must not be empty"
+    if find_account_index(accounts, name) >= 0:
+        define msg as "account already exists: " + name
+        return optional msg
+    return nothing
+
+function check_amount(cents: Int) -> Optional<String>:
+    if cents <= 0:
+        return optional "amount must be a positive number of cents"
+    return nothing
+
+function check_balance(balance_cents: Int, cents: Int) -> Optional<String>:
+    if cents > balance_cents:
+        return optional "insufficient funds"
+    return nothing
+
+# ---------------------------------------------------------------- operations
+# Apply-and-validate pair per operation. validate_* returns nothing when the
+# operation may proceed or an error message; apply_* returns a NEW list with
+# the change applied (the caller's list is never mutated, keeping value
+# semantics identical on Python, Rust, C++, Go, C, and TypeScript).
+
+function validate_deposit(accounts: List<Account>, name: String, cents: Int) -> Optional<String>:
+    if find_account_index(accounts, name) < 0:
+        define msg as "unknown account: " + name
+        return optional msg
+    define aerr as check_amount(cents)
+    if aerr is not nothing:
+        return aerr
+    return nothing
+
+function validate_withdraw(accounts: List<Account>, name: String, cents: Int) -> Optional<String>:
+    define idx as find_account_index(accounts, name)
+    if idx < 0:
+        define msg as "unknown account: " + name
+        return optional msg
+    define aerr as check_amount(cents)
+    if aerr is not nothing:
+        return aerr
+    define berr as check_balance(accounts[idx].balance_cents, cents)
+    if berr is not nothing:
+        define wmsg as "cannot withdraw from " + name + ": " + value of berr
+        return optional wmsg
+    return nothing
+
+function validate_transfer(accounts: List<Account>, from_name: String, to_name: String, cents: Int) -> Optional<String>:
+    define fi as find_account_index(accounts, from_name)
+    if fi < 0:
+        define fmsg as "unknown account: " + from_name
+        return optional fmsg
+    define ti as find_account_index(accounts, to_name)
+    if ti < 0:
+        define tmsg as "unknown account: " + to_name
+        return optional tmsg
+    if fi == ti:
+        define smsg as "cannot transfer to the same account: " + from_name
+        return optional smsg
+    define aerr as check_amount(cents)
+    if aerr is not nothing:
+        return aerr
+    define berr as check_balance(accounts[fi].balance_cents, cents)
+    if berr is not nothing:
+        define bmsg as "cannot transfer from " + from_name + ": " + value of berr
+        return optional bmsg
+    return nothing
+
+# Explicit element-wise copy: `define list out as src` copies on Python,
+# Rust, and C++ but aliases the backing storage on Go, C, and TypeScript,
+# so apply_* use this helper to guarantee the caller's list is untouched
+# on every backend.
+function copy_accounts(accounts: List<Account>) -> List<Account>:
+    define out as empty List<Account>
+    for each a in accounts:
+        add a to out
+    return out
+
+function apply_deposit(accounts: List<Account>, idx: Int, cents: Int) -> List<Account>:
+    define out as copy_accounts(accounts)
+    set out[idx] to Account(id=out[idx].id, name=out[idx].name, balance_cents=out[idx].balance_cents + cents)
+    return out
+
+function apply_withdraw(accounts: List<Account>, idx: Int, cents: Int) -> List<Account>:
+    define out as copy_accounts(accounts)
+    set out[idx] to Account(id=out[idx].id, name=out[idx].name, balance_cents=out[idx].balance_cents - cents)
+    return out
+
+function apply_transfer(accounts: List<Account>, from_idx: Int, to_idx: Int, cents: Int) -> List<Account>:
+    define out as copy_accounts(accounts)
+    set out[from_idx] to Account(id=out[from_idx].id, name=out[from_idx].name, balance_cents=out[from_idx].balance_cents - cents)
+    set out[to_idx] to Account(id=out[to_idx].id, name=out[to_idx].name, balance_cents=out[to_idx].balance_cents + cents)
+    return out
+
+# ---------------------------------------------------------------- money text
+# Exact integer rendering: 1234 cents -> "12.34", -250 -> "-2.50".
+
+function dollars_text(cents: Int) -> String:
+    define mag as cents
+    define neg as cents < 0
+    if neg:
+        set mag to 0 - cents
+    define whole as mag / 100
+    define rem as mag % 100
+    define rem_text as text of rem
+    if rem < 10:
+        set rem_text to "0" + rem_text
+    define out as text of whole + "." + rem_text
+    if neg:
+        set out to "-" + out
+    return out
+
+# Compatibility shim: referencing `format <float> with N decimals` here keeps
+# the runtime float-format helper linked in every backend. (Some backends emit
+# that helper lazily; JSON serialization needs it, and this reference makes
+# sure the flag is seen before codegen emits the serialization helpers.)
+function dollars_float_preview(v: Float) -> String:
+    return format v with 2 decimals

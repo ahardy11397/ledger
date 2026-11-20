@@ -1,0 +1,7 @@
+node_modules/
+ledger_bin
+data/
+tests/tmp/
+*.lock.tmp
+build.lock
+tests/meme/*.meme.lock

@@ -1,0 +1,78 @@
+# 05_operations_test.meme -- apply-and-validate functions in ledger.meme:
+# full deposit / withdraw / transfer operation semantics including
+# unknown-account, self-transfer, and insufficient-funds rejections.
+use ledger
+
+test transfer_ok_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=1000) to accounts
+    add Account(id=2, name="bob", balance_cents=0) to accounts
+    define err as validate_transfer(accounts, "alice", "bob", 600)
+    assert err is nothing
+    define moved as apply_transfer(accounts, 0, 1, 600)
+    assert moved[0].balance_cents == 400
+    assert moved[1].balance_cents == 600
+    assert accounts[0].balance_cents == 1000
+
+test transfer_self_rejected_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=1000) to accounts
+    define err as validate_transfer(accounts, "alice", "alice", 100)
+    assert err is not nothing
+    assert value of err == "cannot transfer to the same account: alice"
+
+test transfer_insufficient_funds_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=100) to accounts
+    add Account(id=2, name="bob", balance_cents=0) to accounts
+    define err as validate_transfer(accounts, "alice", "bob", 200)
+    assert err is not nothing
+    assert value of err == "cannot transfer from alice: insufficient funds"
+
+test transfer_unknown_from_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=100) to accounts
+    define err as validate_transfer(accounts, "carol", "alice", 10)
+    assert err is not nothing
+    assert value of err == "unknown account: carol"
+
+test transfer_unknown_to_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=100) to accounts
+    define err as validate_transfer(accounts, "alice", "carol", 10)
+    assert err is not nothing
+    assert value of err == "unknown account: carol"
+
+test transfer_zero_amount_rejected_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=100) to accounts
+    add Account(id=2, name="bob", balance_cents=0) to accounts
+    define err as validate_transfer(accounts, "alice", "bob", 0)
+    assert err is not nothing
+    assert value of err == "amount must be a positive number of cents"
+
+test deposit_validate_and_apply_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=0) to accounts
+    assert validate_deposit(accounts, "alice", 500) is nothing
+    define funded as apply_deposit(accounts, 0, 500)
+    assert funded[0].balance_cents == 500
+    define unknown as validate_deposit(accounts, "carol", 500)
+    assert unknown is not nothing
+    assert value of unknown == "unknown account: carol"
+    define zero as validate_deposit(accounts, "alice", 0)
+    assert zero is not nothing
+    assert value of zero == "amount must be a positive number of cents"
+
+test withdraw_validate_and_apply_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=700) to accounts
+    assert validate_withdraw(accounts, "alice", 700) is nothing
+    define drained as apply_withdraw(accounts, 0, 700)
+    assert drained[0].balance_cents == 0
+    define insufficient as validate_withdraw(accounts, "alice", 701)
+    assert insufficient is not nothing
+    assert value of insufficient == "cannot withdraw from alice: insufficient funds"
+    define unknown as validate_withdraw(accounts, "carol", 1)
+    assert unknown is not nothing
+    assert value of unknown == "unknown account: carol"

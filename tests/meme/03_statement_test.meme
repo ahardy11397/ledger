@@ -1,0 +1,114 @@
+# 03_statement_test.meme -- calendar math and month replay with FIXED epochs
+# (no wall-clock assertions; deterministic values only).
+use ledger
+use statement
+
+test month_bucket_fixed_epochs_test:
+    assert epoch_to_month_index(0) == 1970 * 12 + 0
+    assert epoch_to_month_index(1704067200) == 2024 * 12 + 0
+    assert epoch_to_month_index(1709164800) == 2024 * 12 + 1
+    assert epoch_to_month_index(1698796800) == 2023 * 12 + 10
+    assert epoch_to_month_index(1735689600) == 2025 * 12 + 0
+    assert epoch_to_month_index(1796083200) == 2026 * 12 + 11
+
+test days_in_month_test:
+    assert days_in_month(2024, 2) == 29
+    assert days_in_month(2023, 2) == 28
+    assert days_in_month(2000, 2) == 29
+    assert days_in_month(1900, 2) == 28
+    assert days_in_month(2026, 11) == 30
+    assert days_in_month(2026, 12) == 31
+    assert days_in_month(2026, 4) == 30
+
+test leap_year_rules_test:
+    assert is_leap_year(2024) is true
+    assert is_leap_year(2023) is false
+    assert is_leap_year(2000) is true
+    assert is_leap_year(1900) is false
+
+test epoch_to_day_test:
+    # 2024-02-29T00:00:00Z is the leap day itself
+    assert epoch_to_day(1709164800, 2024, 2) == 29
+    # 2023-11-08T00:00:00Z
+    assert epoch_to_day(1699401600, 2023, 11) == 8
+    # 2023-12-01T00:00:00Z
+    assert epoch_to_day(1701388800, 2023, 12) == 1
+
+test month_replay_two_months_test:
+    define txs as empty List<Transaction>
+    # appended deliberately out of chronological order to exercise the sort
+    add Transaction(id=1, from_id=0, to_id=1, amount_cents=1000, epoch=1698796800) to txs
+    add Transaction(id=2, from_id=1, to_id=0, amount_cents=300, epoch=1701388800) to txs
+    add Transaction(id=3, from_id=0, to_id=1, amount_cents=250, epoch=1699401600) to txs
+    define nov as month_replay(txs, 1, 2023 * 12 + 10)
+    assert nov[0] == 0
+    assert nov[1] == 1250
+    assert nov[2] == 1250
+    assert nov[3] == 0
+    assert nov[4] == 2
+    define dec as month_replay(txs, 1, 2023 * 12 + 11)
+    assert dec[0] == 1250
+    assert dec[1] == 950
+    assert dec[2] == 0
+    assert dec[3] == 300
+    assert dec[4] == 1
+
+test month_replay_gap_month_test:
+    # txs in Jan and Mar 2023 but none in Feb: opening == closing == 1000
+    define txs as empty List<Transaction>
+    add Transaction(id=1, from_id=0, to_id=1, amount_cents=1000, epoch=1672531200) to txs
+    add Transaction(id=2, from_id=0, to_id=1, amount_cents=400, epoch=1677628800) to txs
+    define feb as month_replay(txs, 1, 2023 * 12 + 1)
+    assert feb[0] == 1000
+    assert feb[1] == 1000
+    assert feb[4] == 0
+    define mar as month_replay(txs, 1, 2023 * 12 + 2)
+    assert mar[0] == 1000
+    assert mar[1] == 1400
+    assert mar[4] == 1
+
+test month_replay_transfer_both_sides_test:
+    # one transfer seen from both accounts in the same month
+    define txs as empty List<Transaction>
+    add Transaction(id=1, from_id=0, to_id=1, amount_cents=1000, epoch=1698796800) to txs
+    add Transaction(id=2, from_id=1, to_id=2, amount_cents=400, epoch=1699401600) to txs
+    define from_side as month_replay(txs, 1, 2023 * 12 + 10)
+    assert from_side[1] == 600
+    assert from_side[3] == 400
+    define to_side as month_replay(txs, 2, 2023 * 12 + 10)
+    assert to_side[0] == 0
+    assert to_side[1] == 400
+    assert to_side[2] == 400
+    assert to_side[3] == 0
+
+test print_statement_year_validation_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=0) to accounts
+    define txs as empty List<Transaction>
+    define early as print_month_statement(accounts, txs, "alice", 1969, 11)
+    assert early is not nothing
+    assert value of early == "year must be 1970 or later"
+
+test transaction_kind_test:
+    define dep as Transaction(id=1, from_id=0, to_id=1, amount_cents=5, epoch=0)
+    define wdr as Transaction(id=2, from_id=1, to_id=0, amount_cents=5, epoch=0)
+    define tin as Transaction(id=3, from_id=9, to_id=1, amount_cents=5, epoch=0)
+    define tout as Transaction(id=4, from_id=1, to_id=9, amount_cents=5, epoch=0)
+    assert transaction_kind(dep, 1) == "DEPOSIT"
+    assert transaction_kind(wdr, 1) == "WITHDRAWAL"
+    assert transaction_kind(tin, 1) == "TRANSFER IN"
+    assert transaction_kind(tout, 1) == "TRANSFER OUT"
+    assert account_delta(dep, 1) == 5
+    assert account_delta(wdr, 1) == -5
+    assert account_delta(tin, 1) == 5
+    assert account_delta(tout, 1) == -5
+    assert account_delta(dep, 9) == 0
+
+test month_replay_no_transactions_test:
+    define txs as empty List<Transaction>
+    define replay as month_replay(txs, 1, 2026 * 12 + 10)
+    assert replay[0] == 0
+    assert replay[1] == 0
+    assert replay[2] == 0
+    assert replay[3] == 0
+    assert replay[4] == 0

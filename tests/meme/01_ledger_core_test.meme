@@ -1,0 +1,48 @@
+# 01_ledger_core_test.meme -- add / deposit / withdraw / transfer validation
+use ledger
+
+test add_ok_test:
+    define accounts as empty List<Account>
+    define err as check_new_name(accounts, "alice")
+    assert err is nothing
+    assert next_account_id(accounts) == 1
+    add Account(id=next_account_id(accounts), name="alice", balance_cents=0) to accounts
+    assert next_account_id(accounts) == 2
+
+test add_duplicate_rejected_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=0) to accounts
+    define err as check_new_name(accounts, "alice")
+    assert err is not nothing
+    assert value of err == "account already exists: alice"
+
+test add_empty_name_rejected_test:
+    define accounts as empty List<Account>
+    define err as check_new_name(accounts, "")
+    assert err is not nothing
+    assert value of err == "account name must not be empty"
+
+test deposit_ok_test:
+    assert check_amount(1) is nothing
+    assert check_amount(100000) is nothing
+
+test deposit_zero_rejected_test:
+    assert check_amount(0) is not nothing
+    assert value of check_amount(0) == "amount must be a positive number of cents"
+
+test deposit_negative_rejected_test:
+    assert check_amount(-5) is not nothing
+
+test withdraw_insufficient_funds_test:
+    assert check_balance(100, 200) is not nothing
+    assert value of check_balance(100, 200) == "insufficient funds"
+    assert check_balance(100, 100) is nothing
+    assert check_balance(100, 50) is nothing
+
+test find_account_index_test:
+    define accounts as empty List<Account>
+    add Account(id=1, name="alice", balance_cents=10) to accounts
+    add Account(id=2, name="bob", balance_cents=20) to accounts
+    assert find_account_index(accounts, "alice") == 0
+    assert find_account_index(accounts, "bob") == 1
+    assert find_account_index(accounts, "carol") == 0 - 1

@@ -1,0 +1,164 @@
+# main.meme -- ledger CLI. argv router only; domain logic lives in the
+# ledger and statement modules.
+#
+# State: JSON files under data/ (created on demand):
+#   data/accounts.json      List<Account>
+#   data/transactions.json  List<Transaction>
+#
+# Exit codes: 0 success, 1 validation/usage error.
+
+use ledger
+use statement
+
+function report_error(msg: String) -> Void:
+    # one clear line to stderr
+    append msg + "\n" to file "/dev/stderr"
+
+function print_usage() -> Void:
+    append "Usage:" + "\n" to file "/dev/stderr"
+    append "  ledger add <account-name>" + "\n" to file "/dev/stderr"
+    append "  ledger deposit <account> <cents>" + "\n" to file "/dev/stderr"
+    append "  ledger withdraw <account> <cents>" + "\n" to file "/dev/stderr"
+    append "  ledger transfer <from> <to> <cents>" + "\n" to file "/dev/stderr"
+    append "  ledger balance <account>" + "\n" to file "/dev/stderr"
+    append "  ledger statement <account> <yyyy-mm>" + "\n" to file "/dev/stderr"
+    append "  ledger list" + "\n" to file "/dev/stderr"
+
+function parse_cents(raw: String) -> Int:
+    return integer value of raw or else 0
+
+define accounts_path as "data/accounts.json"
+define transactions_path as "data/transactions.json"
+
+define accounts as load_accounts(accounts_path)
+define txs as load_transactions(transactions_path)
+define arg_total as argument count
+
+if arg_total < 2:
+    call print_usage()
+    exit with code 1
+
+define cmd as argument 1
+
+if cmd == "add":
+    if arg_total != 3:
+        call report_error("usage: ledger add <account-name>")
+        exit with code 1
+    define name as argument 2
+    define err as check_new_name(accounts, name)
+    if err is not nothing:
+        call report_error(value of err)
+        exit with code 1
+    define acct as Account(id=next_account_id(accounts), name=name, balance_cents=0)
+    add acct to accounts
+    create directory "data"
+    call save_accounts(accounts, accounts_path)
+    print "account created: " + name + " (id " + text of acct.id + ")"
+    exit with code 0
+else if cmd == "deposit":
+    if arg_total != 4:
+        call report_error("usage: ledger deposit <account> <cents>")
+        exit with code 1
+    define name as argument 2
+    define cents as parse_cents(argument 3)
+    define verr as validate_deposit(accounts, name, cents)
+    if verr is not nothing:
+        call report_error(value of verr)
+        exit with code 1
+    define idx as find_account_index(accounts, name)
+    set accounts to apply_deposit(accounts, idx, cents)
+    define new_balance as accounts[idx].balance_cents
+    define tx as Transaction(id=next_transaction_id(txs), from_id=0, to_id=accounts[idx].id, amount_cents=cents, epoch=current epoch seconds)
+    add tx to txs
+    create directory "data"
+    call save_accounts(accounts, accounts_path)
+    call save_transactions(txs, transactions_path)
+    print "deposited $" + dollars_text(cents) + " into " + name + " (new balance $" + dollars_text(new_balance) + ")"
+    exit with code 0
+else if cmd == "withdraw":
+    if arg_total != 4:
+        call report_error("usage: ledger withdraw <account> <cents>")
+        exit with code 1
+    define name as argument 2
+    define cents as parse_cents(argument 3)
+    define verr as validate_withdraw(accounts, name, cents)
+    if verr is not nothing:
+        call report_error(value of verr)
+        exit with code 1
+    define idx as find_account_index(accounts, name)
+    set accounts to apply_withdraw(accounts, idx, cents)
+    define new_balance as accounts[idx].balance_cents
+    define tx as Transaction(id=next_transaction_id(txs), from_id=accounts[idx].id, to_id=0, amount_cents=cents, epoch=current epoch seconds)
+    add tx to txs
+    create directory "data"
+    call save_accounts(accounts, accounts_path)
+    call save_transactions(txs, transactions_path)
+    print "withdrew $" + dollars_text(cents) + " from " + name + " (new balance $" + dollars_text(new_balance) + ")"
+    exit with code 0
+else if cmd == "transfer":
+    if arg_total != 5:
+        call report_error("usage: ledger transfer <from> <to> <cents>")
+        exit with code 1
+    define from_name as argument 2
+    define to_name as argument 3
+    define cents as parse_cents(argument 4)
+    define verr as validate_transfer(accounts, from_name, to_name, cents)
+    if verr is not nothing:
+        call report_error(value of verr)
+        exit with code 1
+    define fi as find_account_index(accounts, from_name)
+    define ti as find_account_index(accounts, to_name)
+    set accounts to apply_transfer(accounts, fi, ti, cents)
+    define tx as Transaction(id=next_transaction_id(txs), from_id=accounts[fi].id, to_id=accounts[ti].id, amount_cents=cents, epoch=current epoch seconds)
+    add tx to txs
+    create directory "data"
+    call save_accounts(accounts, accounts_path)
+    call save_transactions(txs, transactions_path)
+    print "transferred $" + dollars_text(cents) + " from " + from_name + " to " + to_name
+    exit with code 0
+else if cmd == "balance":
+    if arg_total != 3:
+        call report_error("usage: ledger balance <account>")
+        exit with code 1
+    define name as argument 2
+    define idx as find_account_index(accounts, name)
+    if idx < 0:
+        call report_error("unknown account: " + name)
+        exit with code 1
+    print text of accounts[idx].id + " " + accounts[idx].name + ": $" + dollars_text(accounts[idx].balance_cents)
+    exit with code 0
+else if cmd == "statement":
+    if arg_total != 4:
+        call report_error("usage: ledger statement <account> <yyyy-mm>")
+        exit with code 1
+    define name as argument 2
+    define parts as split argument 3 by "-"
+    if length of parts != 2:
+        call report_error("month must be <yyyy>-<mm>")
+        exit with code 1
+    define year as integer value of parts[0] or else 0
+    define month as integer value of parts[1] or else 0
+    define serr as print_month_statement(accounts, txs, name, year, month)
+    if serr is not nothing:
+        call report_error(value of serr)
+        exit with code 1
+    exit with code 0
+else if cmd == "list":
+    if arg_total != 2:
+        call report_error("usage: ledger list")
+        exit with code 1
+    if length of accounts == 0:
+        print "no accounts"
+        exit with code 0
+    define names as empty List<String>
+    for each a in accounts:
+        add a.name to names
+    sort names ascending
+    for each n in names:
+        define i as find_account_index(accounts, n)
+        print text of accounts[i].id + " " + accounts[i].name + ": $" + dollars_text(accounts[i].balance_cents)
+    exit with code 0
+else:
+    call report_error("unknown command: " + cmd)
+    call print_usage()
+    exit with code 1
