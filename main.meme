@@ -12,17 +12,17 @@ use statement
 
 function report_error(msg: String) -> Void:
     # one clear line to stderr
-    append msg + "\n" to file "/dev/stderr"
+    print error msg
 
 function print_usage() -> Void:
-    append "Usage:" + "\n" to file "/dev/stderr"
-    append "  ledger add <account-name>" + "\n" to file "/dev/stderr"
-    append "  ledger deposit <account> <cents>" + "\n" to file "/dev/stderr"
-    append "  ledger withdraw <account> <cents>" + "\n" to file "/dev/stderr"
-    append "  ledger transfer <from> <to> <cents>" + "\n" to file "/dev/stderr"
-    append "  ledger balance <account>" + "\n" to file "/dev/stderr"
-    append "  ledger statement <account> <yyyy-mm>" + "\n" to file "/dev/stderr"
-    append "  ledger list" + "\n" to file "/dev/stderr"
+    print error "Usage:"
+    print error "  ledger add <account-name>"
+    print error "  ledger deposit <account> <cents>"
+    print error "  ledger withdraw <account> <cents>"
+    print error "  ledger transfer <from> <to> <cents>"
+    print error "  ledger balance <account>"
+    print error "  ledger statement <account> <yyyy-mm>"
+    print error "  ledger list"
 
 function parse_cents(raw: String) -> Int:
     return integer value of raw or else 0

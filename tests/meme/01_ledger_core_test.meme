@@ -1,5 +1,5 @@
 # 01_ledger_core_test.meme -- add / deposit / withdraw / transfer validation
-use ledger
+use ../../ledger
 
 test add_ok_test:
     define accounts as empty List<Account>

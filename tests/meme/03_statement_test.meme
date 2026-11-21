@@ -1,7 +1,7 @@
 # 03_statement_test.meme -- calendar math and month replay with FIXED epochs
 # (no wall-clock assertions; deterministic values only).
-use ledger
-use statement
+use ../../ledger
+use ../../statement
 
 test month_bucket_fixed_epochs_test:
     assert epoch_to_month_index(0) == 1970 * 12 + 0

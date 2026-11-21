@@ -1,6 +1,6 @@
 # 02_money_math_test.meme -- balance math across multiple operations,
 # whole-record replacement semantics, and dollar rendering.
-use ledger
+use ../../ledger
 
 test balance_math_multiops_test:
     # alice: 0 -> +1000 -> -300 (withdraw) -> -250 (transfer out) = 450

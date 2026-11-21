@@ -1,7 +1,7 @@
 # 04_persistence_test.meme -- JSON roundtrips and corrupt-file tolerance via
 # the Optional readers. Scratch files use per-test unique names and live in
 # the compiler-managed test working directory (cleaned up automatically).
-use ledger
+use ../../ledger
 
 test json_roundtrip_accounts_test:
     define accounts as empty List<Account>

@@ -125,7 +125,6 @@ function account_delta(t: Transaction, acct_id: Int) -> Int:
 # Replays every transaction of one account in chronological order and
 # returns [opening, closing, total_in, total_out, count] for the month.
 function month_replay(txs: List<Transaction>, acct_id: Int, bucket: Int) -> List<Int>:
-    define mine as sort_transactions_by_epoch(transactions_for_account(txs, acct_id))
     define running as 0
     define opening as 0
     define closing as 0
@@ -133,7 +132,7 @@ function month_replay(txs: List<Transaction>, acct_id: Int, bucket: Int) -> List
     define total_out as 0
     define count as 0
     define opening_set as false
-    for each t in mine:
+    for each t in sort_transactions_by_epoch(transactions_for_account(txs, acct_id)):
         define mi as epoch_to_month_index(t.epoch)
         define d as account_delta(t, acct_id)
         if mi == bucket:
@@ -193,9 +192,8 @@ function print_month_statement(accounts: List<Account>, txs: List<Transaction>, 
     define count as summary[4]
     print "== Monthly statement: " + acct.name + " (id " + text of acct.id + "), " + text of year + "-" + pad2(month) + " =="
     print "Opening balance: $" + dollars_text(opening)
-    define mine as sort_transactions_by_epoch(transactions_for_account(txs, acct.id))
     define running as opening
-    for each t in mine:
+    for each t in sort_transactions_by_epoch(transactions_for_account(txs, acct.id)):
         define mi as epoch_to_month_index(t.epoch)
         if mi == bucket:
             define d as account_delta(t, acct.id)

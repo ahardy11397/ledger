@@ -1,7 +1,7 @@
 # 05_operations_test.meme -- apply-and-validate functions in ledger.meme:
 # full deposit / withdraw / transfer operation semantics including
 # unknown-account, self-transfer, and insufficient-funds rejections.
-use ledger
+use ../../ledger
 
 test transfer_ok_test:
     define accounts as empty List<Account>
